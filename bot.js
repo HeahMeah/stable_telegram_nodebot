@@ -1,6 +1,7 @@
 const { Telegraf, Markup} = require('telegraf');
 const axios = require('axios');
 const fs = require('fs');
+const util = require('util');
 require('dotenv').config();
 
 
@@ -28,29 +29,8 @@ const NEXT = "NEXT";
 const PREVIOUS = "PREVIOUS";
 const END_GUIDE = "END_GUIDE";
 const url = 'http://127.0.0.1:7860'
+const writeFile = util.promisify(fs.writeFile);
 
-bot.start((ctx) => {
-    const userId = ctx.from.id;
-
-    if (!userData[userId]) {
-        userData[userId] = {
-            //sd_model_checkpoint: user.model,
-            width: 768,  // default width
-            height: 768,  // default height
-            cfg: '6',  // default cfg
-            sampler: 'Euler',  // default sampler
-            upscaleTo: '2',  // default upscaleTo
-            quality: '20',  // default quality
-            upscaler: 'None',  // default upscaler
-            seed: -1,  // default seed (random)
-            embedding: 'easynegative, verybadimagenegative_v1.3',
-            upscale_on: 'false'
-        };
-    }
-
-    ctx.reply('Welcome!', Markup.keyboard(menu).resize());
-    ctx.reply(guide_sections[0], createMenu(0));
-})
 
 // Inline menus
 const inline_menu_embedding = [
@@ -105,6 +85,33 @@ const inline_menu_seed = [
     [{text: "Return previous seed" + " ♻", callback_data: 'return_prev'}]
 ];
 
+const inline_menu_again = [
+    [{text: "Again" , callback_data: 'generate_again'}],
+];
+
+
+bot.start((ctx) => {
+    const userId = ctx.from.id;
+
+    if (!userData[userId]) {
+        userData[userId] = {
+            //sd_model_checkpoint: user.model,
+            width: 768,  // default width
+            height: 768,  // default height
+            cfg: '6',  // default cfg
+            sampler: 'Euler',  // default sampler
+            upscaleTo: '2',  // default upscaleTo
+            quality: '20',  // default quality
+            upscaler: 'None',  // default upscaler
+            seed: -1,  // default seed (random)
+            embedding: 'easynegative, verybadimagenegative_v1.3',
+            upscale_on: 'false'
+        };
+    }
+
+    ctx.reply('Welcome!', Markup.keyboard(menu).resize());
+    ctx.reply(guide_sections[0], createMenu(0));
+})
 
 bot.hears('Sampler', (ctx) => {
     ctx.reply('Choose a sampler', Markup.inlineKeyboard(inline_menu_sampler));
@@ -183,7 +190,7 @@ bot.on('text', async (ctx) => {
     if (userData[userId].userPrompt) {
         userData[userId].prompt = userText;
         userData[userId].userPrompt = false;
-        await generateImage(ctx);
+        await startGeneration(ctx);
         await updateProgress(ctx);
     }
     // If user has entered "Generate!"
@@ -194,7 +201,7 @@ bot.on('text', async (ctx) => {
     // If user sends any other message, start image generation
     else {
         userData[userId].prompt = userText;
-        await generateImage(ctx);
+        await startGeneration(ctx);
         await updateProgress(ctx);
     }
 });
@@ -292,7 +299,7 @@ bot.on('callback_query', async (ctx) => {
             ctx.answerCbQuery("You've selected R-ESRGAN 4x+ Anime6B.");
             break;
         case 'rea':
-            userData[userId].upscaler = 'ESRGAN 4x';
+            userData[userId].upscaler = 'ESRGAN_4x';
             userData[userId].upscale_on = 'true';
             ctx.answerCbQuery("You've selected ESRGAN 4x.");
             break;
@@ -309,7 +316,22 @@ bot.on('callback_query', async (ctx) => {
     }
 });
 
-function createMenu(index) {
+bot.action('generate_again', async (ctx) => {
+    console.log('Generate again action triggered');
+    try {
+        console.log('Before startGeneration');
+        await startGeneration(ctx);
+        console.log('After startGeneration, before updateProgress');
+        await updateProgress(ctx);
+        console.log('After updateProgress, before answerCbQuery');
+        await ctx.answerCbQuery('Generating the image again...');
+        console.log('After answerCbQuery');
+    } catch (error) {
+        console.error(`Error in generating image again: ${error}`);
+    }
+});
+
+async function createMenu(index) {
     const menu = [];
 
     if (index > 0) {
@@ -325,7 +347,7 @@ function createMenu(index) {
 }
 
 //Main Stable-Dif functions
-async function generateImage(ctx) {
+async function generateImage(ctx, messageID) {
     const userId = ctx.from.id;
     const user = userData[userId];
     const payload = {
@@ -353,23 +375,84 @@ async function generateImage(ctx) {
             const image_data_base64 = response.data.images[0];
             user.image_data_base64 = image_data_base64;
             const image_data = Buffer.from(image_data_base64, 'base64');
-            await fs.writeFile("generated_image.png", image_data);
+            await writeFile("generated_image.png", image_data);
             user.image_ready = true;
 
             if (user.upscale_on === "true") {
-                await upscaleImage(ctx);
+                await upscaleImage(ctx, messageID);
+                await cleanup(ctx, messageID);
             } else {
-                await ctx.replyWithPhoto({ source: fs.createReadStream('generated_image.png') });
+                await ctx.replyWithPhoto({ source: fs.createReadStream('generated_image.png') },
+                    { reply_markup: { inline_keyboard: inline_menu_again } } );
+                await cleanup(ctx, messageID);
 
             }
         } else {
             await ctx.reply(`Generation failed with status code ${response.status}`);
+            await cleanup(ctx, messageID);
             user.image_ready = true;
         }
     } catch (err) {
         console.error(err);
     }
 }
+
+
+async function img2img(ctx){
+    const userId = ctx.from.id;
+    const user = userData[userId];
+
+    const payload = {
+        init_images: [user.init_image],
+        resize_mode: 0,
+        denoising_strength: 0.75,
+        image_cfg_scale: 0,
+        mask: user.mask,
+        mask_blur: 4,
+        inpainting_fill: 0,
+        inpaint_full_res: true,
+        inpaint_full_res_padding: 0,
+        inpainting_mask_invert: 0,
+        initial_noise_multiplier: 0,
+        prompt: user.prompt,
+        styles: [user.style],
+        seed: user.seed,
+        subseed: user.subseed,
+        subseed_strength: 0,
+        seed_resize_from_h: user.seed_resize_from_h,
+        seed_resize_from_w: user.seed_resize_from_w,
+        sampler_name: user.sampler_name,
+        batch_size: 1,
+        n_iter: 1,
+        steps: user.steps,
+        cfg_scale: 7,
+        width: user.width,
+        height: user.height,
+        restore_faces: false,
+        tiling: false,
+        do_not_save_samples: false,
+        do_not_save_grid: false,
+        negative_prompt: user.negative_prompt,
+        eta: 0,
+        s_churn: 0,
+        s_tmax: 0,
+        s_tmin: 0,
+        s_noise: 1,
+        override_settings: {},
+        override_settings_restore_afterwards: true,
+        script_args: [],
+        sampler_index: "Euler",
+        include_init_images: false,
+        script_name: user.script_name,
+        send_images: true,
+        save_images: false,
+        alwayson_scripts: {}
+    };
+
+    // rest of your function here...
+}
+
+
 //Upscale
 async function upscaleImage(ctx) {
     const userId = ctx.from.id;
@@ -392,10 +475,11 @@ async function upscaleImage(ctx) {
         if (response.status === 200) {
             const upscaled_image_data_base64 = response.data.image;
             const upscaled_image_data = Buffer.from(upscaled_image_data_base64, 'base64');
-            await fs.writeFile("upscaled_image.png", upscaled_image_data);
+            await writeFile("upscaled_image.png", upscaled_image_data);
             await ctx.replyWithPhoto({ source: fs.createReadStream('upscaled_image.png') });
         } else {
             await ctx.reply(`Upscaling failed with status code ${response.status}`);
+
         }
     } catch (err) {
         console.error(err);
@@ -404,7 +488,7 @@ async function upscaleImage(ctx) {
 
 async function getProgress() {
     try {
-        const response = await axios.get('${url}/sdapi/v1/progress?skip_current_image=false');
+        const response = await axios.get(`${url}/sdapi/v1/progress?skip_current_image=false`);
         const data = response.data;
         const progress = data.progress;
         const eta_relative = data.eta_relative;
@@ -430,13 +514,14 @@ function updateProgress(ctx) {
             const etaMinutes = Math.floor(eta_relative / 60);
             const etaSeconds = Math.floor(eta_relative % 60);
             const spinnerState = spinnerStates[spinnerIndex % 4];
+            console.log("Progress!!", progress);
 
             try {
                 await ctx.telegram.editMessageText(
                     ctx.chat.id,
                     messageID,
                     undefined,
-                    `Generating...${spinnerState} (${progressPercentage}% complete, ETA: ${etaMinutes}m ${etaSeconds}s)`
+                    `Generating image...${spinnerState} (${progressPercentage}% complete, ETA: ${etaMinutes}m ${etaSeconds}s)`
                 );
             } catch (error) {
                 console.error(`Failed to update progress: ${error}`);
@@ -452,7 +537,13 @@ function updateProgress(ctx) {
         }
     }, 500);
 }
-
+async function startGeneration(ctx) {
+    const message = await ctx.reply('Generating image...');
+    userData[ctx.from.id].message_id = message.message_id;
+    userData[ctx.from.id].image_ready = false;
+    await updateProgress(ctx);
+    await generateImage(ctx,message.message_id);
+}
 async function cleanup(ctx, messageID) {
     try {
         await ctx.telegram.deleteMessage(ctx.chat.id, messageID);
@@ -461,4 +552,8 @@ async function cleanup(ctx, messageID) {
     }
 }
 
-bot.launch();
+process.on('uncaughtException', function (err) {
+    console.log(err);
+});
+
+bot.launch()
