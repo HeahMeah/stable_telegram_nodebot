@@ -1,18 +1,38 @@
 const { Telegraf, Markup} = require('telegraf');
 const { MenuMiddleware } = require('telegraf-inline-menu');
-
 const axios = require('axios');
 const fs = require('fs');
 const util = require('util');
 const userData = require('./datastore');
 require('dotenv').config();
-const menuMiddleware = new MenuMiddleware('/', inlineMenu);
 const inlineMenu = require('./botmenus'); // Import inline menus
 
 
 // Create the bot
 const bot = new Telegraf(process.env.BOT_TOKEN);
-bot.use(menuMiddleware.middleware());
+
+const menu = [
+    ["Generate!"],
+    ["Guide / Гайд"]
+];
+
+const guide_sections = [
+    "*Section 1*\nStyles:hewlett, 80s-anime-AI, kuvshinov, roy-lichtenstein.",
+    "*Section 2*\nThis is the second section of the guide.",
+    "*Section 3*\nThis is the third section of the guide."
+];
+
+const NEXT = "NEXT";
+const PREVIOUS = "PREVIOUS";
+const END_GUIDE = "END_GUIDE";
+const url = 'http://127.0.0.1:7860'
+const writeFile = util.promisify(fs.writeFile);
+const menuMiddleware = new MenuMiddleware('/', inlineMenu);
+
+// Inline menu under pic
+const inline_menu_again = [
+    [{text: "Again" , callback_data: 'generate_again'}],
+];
 bot.use((ctx, next) => {  // Use user data initialization middleware
     const userId = ctx.from.id;
     if (!userData[userId]) {
@@ -32,32 +52,19 @@ bot.use((ctx, next) => {  // Use user data initialization middleware
     }
     return next();
 });
+bot.action('generate_again', async (ctx) => {
+    try {
+        console.log('Before startGeneration');
+        await startGeneration(ctx);
+        await updateProgress(ctx);
+        await ctx.answerCbQuery('Generating the image again...');
 
+    } catch (error) {
+        console.error(`Error in generating image again:`, error);
+    }
+});
 
-
-const menu = [
-    ["Generate!"],
-    ["Guide / Гайд"]
-];
-
-const guide_sections = [
-    "*Section 1*\nStyles:hewlett, 80s-anime-AI, kuvshinov, roy-lichtenstein.",
-    "*Section 2*\nThis is the second section of the guide.",
-    "*Section 3*\nThis is the third section of the guide."
-];
-
-const NEXT = "NEXT";
-const PREVIOUS = "PREVIOUS";
-const END_GUIDE = "END_GUIDE";
-const url = 'http://127.0.0.1:7860'
-const writeFile = util.promisify(fs.writeFile);
-
-
-// Inline menu under pic
-const inline_menu_again = [
-    [{text: "Again" , callback_data: 'generate_again'}],
-];
-
+bot.use(menuMiddleware.middleware());
 
 bot.start((ctx) => {
     const userId = ctx.from.id;
@@ -69,7 +76,7 @@ bot.start((ctx) => {
             height: 768,  // default height
             cfg: '6',  // default cfg
             sampler: 'Euler',  // default sampler
-            upscaleTo: '2',  // default upscaleTo
+            upscaleTo: '1.2',  // default upscaleTo
             quality: '20',  // default quality
             upscaler: 'None',  // default upscaler
             seed: -1,  // default seed (random)
@@ -83,7 +90,6 @@ bot.start((ctx) => {
 })
 
 bot.hears('Generate!', async ctx => menuMiddleware.replyToContext(ctx));
-
 
 let userGuideSections = {};
 bot.hears("Guide / Гайд", (ctx) => {
@@ -147,7 +153,7 @@ bot.on('photo', async (ctx) => {
     // Get the file object using the file_id
     const file = await ctx.telegram.getFile(fileId);
     // Construct the file download URL
-    const fileUrl = `https://api.telegram.org/file/bot${your_bot_token_here}/${file.file_path}`;
+    const fileUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
     // Download
     await axios({
         url: fileUrl,
@@ -219,20 +225,6 @@ bot.on('callback_query', async (ctx) => {
     }
 });
 
-bot.action('generate_again', async (ctx) => {
-    console.log('Generate again action triggered');
-    try {
-        console.log('Before startGeneration');
-        await startGeneration(ctx);
-        console.log('After startGeneration, before updateProgress');
-        await updateProgress(ctx);
-        console.log('After updateProgress, before answerCbQuery');
-        await ctx.answerCbQuery('Generating the image again...');
-        console.log('After answerCbQuery');
-    } catch (error) {
-        console.error(`Error in generating image again: ${error}`);
-    }
-});
 
 async function createMenu(index) {
     const menu = [];
@@ -248,7 +240,6 @@ async function createMenu(index) {
     }
     return Markup.inlineKeyboard(menu);
 }
-
 
 
 //Main Stable-Dif functions
@@ -269,6 +260,11 @@ async function generateImage(ctx, messageID) {
         sampler_index: user.sampler,
         send_images: "true",
         save_images: "true",
+        hr_upscaler: user.upscaler,
+        hr_scale: user.upscaleTo,
+        enable_hr: user.upscale_on,
+        denoising_strength: 0.8
+
     };
 
     const headers = {'accept': 'application/json'};
@@ -283,13 +279,19 @@ async function generateImage(ctx, messageID) {
             await writeFile("generated_image.png", image_data);
             user.image_ready = true;
 
-            if (user.upscale_on === "true") {
+            console.log('Upscale on:', user.upscale_on);
+            if (String(user.upscale_on) === "false") {
                 await upscaleImage(ctx, messageID);
+                console.log('Upscaling should start now...');
+
                 await cleanup(ctx, messageID);
+                console.log('Upscaling completed, starting cleanup...');
             } else {
+                console.log('Upscale off. Sending image without upscaling...');
                 await ctx.replyWithPhoto({ source: fs.createReadStream('generated_image.png') },
                     { reply_markup: { inline_keyboard: inline_menu_again } } );
                 await cleanup(ctx, messageID);
+                console.log('Sent image and cleaned up');
 
             }
         } else {
@@ -301,6 +303,7 @@ async function generateImage(ctx, messageID) {
         console.error(err);
     }
 }
+
 
 
 // img2img flow
@@ -392,7 +395,8 @@ async function upscaleImage(ctx) {
         upscaler_2: "None",
         extras_upscaler_2_visibility: 0,
         upscale_first: false,
-        image: user.image_data_base64
+        image: user.image_data_base64,
+        denoising_strength: 0.5
     };
 
     const headers = {'accept': 'application/json'};
@@ -479,9 +483,5 @@ async function cleanup(ctx, messageID) {
         console.error(`Cleanup failed with error ${error}`);
     }
 }
-
-process.on('uncaughtException', function (err) {
-    console.log(err);
-});
 
 bot.launch()

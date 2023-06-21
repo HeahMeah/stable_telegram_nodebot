@@ -51,9 +51,9 @@ const inline_menu_upscaler = {
 }
 
 const inline_menu_upscale_to = {
-    1.5: 'Upscale x1.5',
-    2:'Upscale x2',
-    3:'Upscale x3'
+    1.5: '1.5',
+    2:'2',
+    3:'3'
 
 }
 
@@ -170,14 +170,15 @@ submenuUpscaler.select('upscaler', inline_menu_upscaler, {
         const userId = ctx.from.id;
         switch (key) {
             case 're':
-                userData[userId].upscaler = 'R-ESRGAN 4x+ Anime6B';
-                userData[userId].upscale_on = true;
-                ctx.answerCbQuery("You've selected R-ESRGAN 4x+ Anime6B.");
-                break;
-            case 'rea':
                 userData[userId].upscaler = 'ESRGAN_4x';
                 userData[userId].upscale_on = true;
-                ctx.answerCbQuery("You've selected ESRGAN_4x.");
+                ctx.answerCbQuery("You've selected ESRGAN 4x.");
+                console.log(userData[userId].upscale_on)
+                break;
+            case 'rea':
+                userData[userId].upscaler = 'R-ESRGAN 4x+ Anime6B';
+                userData[userId].upscale_on = true;
+                ctx.answerCbQuery("You've selected R-ESRGAN_4x+ Anime6B.");
                 break;
         }
         return true; // refresh menu
