@@ -52,8 +52,8 @@ const inline_menu_upscaler = {
 
 const inline_menu_upscale_to = {
     1.5: '1.5',
-    2:'2',
-    3:'3'
+    1.7:'2',
+    1.9:'3'
 
 }
 

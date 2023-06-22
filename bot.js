@@ -6,6 +6,12 @@ const util = require('util');
 const userData = require('./datastore');
 require('dotenv').config();
 const inlineMenu = require('./botmenus'); // Import inline menus
+const http = require('http');
+const https = require('https');
+
+const httpAgent = new http.Agent({ keepAlive: true });
+const httpsAgent = new https.Agent({ keepAlive: true });
+
 
 
 // Create the bot
@@ -35,6 +41,8 @@ const inline_menu_again = [
 ];
 bot.use((ctx, next) => {  // Use user data initialization middleware
     const userId = ctx.from.id;
+    const username =ctx.from.username;
+    const firstName = ctx.from.first_name;
     if (!userData[userId]) {
         userData[userId] = {
             width: 768,
@@ -48,7 +56,7 @@ bot.use((ctx, next) => {  // Use user data initialization middleware
             embedding: 'easynegative, verybadimagenegative_v1.3',
             upscale_on: 'false'
         };
-        console.log(`Initialized data for user: ${userId}`);
+        console.log(`Initialized data for user: ID - ${userId}, First Name - ${firstName}, Username - ${username}`);
     }
     return next();
 });
@@ -433,42 +441,49 @@ async function getProgress() {
 
 function updateProgress(ctx) {
     let lastProgress = 0;
+    let lastMessage = '';
     let spinnerStates = ['-', '\\', '|', '/'];
     let spinnerIndex = 0;
     let messageID = userData[ctx.from.id].message_id;
 
-    // Start a repeating task that updates the progress every 500 milliseconds
-    let updateTask = setInterval(async () => {
+    const updateTask = async () => {
         const { progress, eta_relative } = await getProgress();
 
-        if (progress != lastProgress) {
-            const progressPercentage = Math.floor(progress * 100);
-            const etaMinutes = Math.floor(eta_relative / 60);
-            const etaSeconds = Math.floor(eta_relative % 60);
-            const spinnerState = spinnerStates[spinnerIndex % 4];
-            console.log("Progress!!", progress);
+        const progressPercentage = Math.floor(progress * 100);
+        const etaMinutes = Math.floor(eta_relative / 60);
+        const etaSeconds = Math.floor(eta_relative % 60);
+        const spinnerState = spinnerStates[spinnerIndex % 4];
+        console.log("Progress!!", progress);
 
+        const newMessage = `Generating image...${spinnerState} (${progressPercentage}% complete, ETA: ${etaMinutes}m ${etaSeconds}s)`;
+
+        // If the new message is different from the last message, update the message
+        if (newMessage !== lastMessage) {
             try {
                 await ctx.telegram.editMessageText(
                     ctx.chat.id,
                     messageID,
                     undefined,
-                    `Generating image...${spinnerState} (${progressPercentage}% complete, ETA: ${etaMinutes}m ${etaSeconds}s)`
+                    newMessage
                 );
+                lastMessage = newMessage;  // Store the new message as the last message
             } catch (error) {
                 console.error(`Failed to update progress: ${error}`);
             }
-
-            lastProgress = progress;
-            spinnerIndex += 1;
         }
+
+        lastProgress = progress;
+        spinnerIndex = (spinnerIndex + 1) % 4; // Ensure spinnerIndex stays within the range of spinnerStates
 
         // If the image is ready, stop the update task
-        if (userData[ctx.from.id].image_ready) {
-            clearInterval(updateTask);
+        if (!userData[ctx.from.id].image_ready) {
+            setTimeout(updateTask, 500);  // If the image is not ready, re-run the task after 500ms
         }
-    }, 500);
+    };
+
+    updateTask();  // Start the task
 }
+
 async function startGeneration(ctx) {
     const message = await ctx.reply('Generating image...');
     userData[ctx.from.id].message_id = message.message_id;
@@ -483,5 +498,9 @@ async function cleanup(ctx, messageID) {
         console.error(`Cleanup failed with error ${error}`);
     }
 }
+axios.get(url, {
+    httpAgent: httpAgent,
+    httpsAgent: httpsAgent,
+});
 
 bot.launch()
