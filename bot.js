@@ -280,7 +280,7 @@ async function generateImage(ctx, messageID) {
             user.image_ready = true;
 
             console.log('Upscale on:', user.upscale_on);
-            if (String(user.upscale_on) === "false") {
+            if (user.upscale_on === -1) { //Not relevant more need to clean up or replace to Control net function call
                 await upscaleImage(ctx, messageID);
                 console.log('Upscaling should start now...');
 
