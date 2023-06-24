@@ -1,4 +1,4 @@
-const { Telegraf, Markup} = require('telegraf');
+const { Telegraf } = require('telegraf');
 const { MenuMiddleware } = require('telegraf-inline-menu');
 const axios = require('axios');
 const fs = require('fs');
@@ -6,39 +6,37 @@ const util = require('util');
 const userData = require('./datastore');
 require('dotenv').config();
 const inlineMenu = require('./botmenus'); // Import inline menus
+const guideMiddleware = require('./guidemenu'); //Import main menu
 const http = require('http');
 const https = require('https');
 
 const httpAgent = new http.Agent({ keepAlive: true });
 const httpsAgent = new https.Agent({ keepAlive: true });
 
-
-
 // Create the bot
 const bot = new Telegraf(process.env.BOT_TOKEN);
+const queue = [];
+
 
 const menu = [
-    ["Generate!"],
+    ["Generate Txt2Img"],
+    ["Generate Img2Img"],
     ["Guide / Гайд"]
 ];
 
-const guide_sections = [
-    "*Section 1*\nStyles:hewlett, 80s-anime-AI, kuvshinov, roy-lichtenstein.",
-    "*Section 2*\nThis is the second section of the guide.",
-    "*Section 3*\nThis is the third section of the guide."
-];
 
-const NEXT = "NEXT";
-const PREVIOUS = "PREVIOUS";
-const END_GUIDE = "END_GUIDE";
 const url = 'http://127.0.0.1:7860'
 const writeFile = util.promisify(fs.writeFile);
-const menuMiddleware = new MenuMiddleware('/', inlineMenu);
+
+
+const menuMiddleware = new MenuMiddleware('menu/', inlineMenu);
 
 // Inline menu under pic
 const inline_menu_again = [
     [{text: "Again" , callback_data: 'generate_again'}],
 ];
+
+
 bot.use((ctx, next) => {  // Use user data initialization middleware
     const userId = ctx.from.id;
     const username =ctx.from.username;
@@ -60,6 +58,22 @@ bot.use((ctx, next) => {  // Use user data initialization middleware
     }
     return next();
 });
+
+
+bot.use((ctx, next) => { // Middleware management
+    if (!ctx.callbackQuery || !ctx.callbackQuery.data) {
+        return next();
+    }
+    if (ctx.callbackQuery.data.startsWith('guide/')) {
+        return guideMiddleware.middleware()(ctx, next);
+    }
+    if (ctx.callbackQuery.data.startsWith('menu/')) {
+        return menuMiddleware.middleware()(ctx, next);
+    }
+    return next();
+});
+
+
 bot.action('generate_again', async (ctx) => {
     try {
         console.log('Before startGeneration');
@@ -72,9 +86,9 @@ bot.action('generate_again', async (ctx) => {
     }
 });
 
-bot.use(menuMiddleware.middleware());
 
-bot.start((ctx) => {
+bot.start((ctx) => handleBotStart(ctx));
+async function handleBotStart(ctx) {
     const userId = ctx.from.id;
 
     if (!userData[userId]) {
@@ -93,38 +107,16 @@ bot.start((ctx) => {
         };
     }
 
-    ctx.reply('Welcome!', Markup.keyboard(menu).resize());
-    ctx.reply(guide_sections[0], createMenu(0));
-})
+    // Call guide middleware when the bot starts up
+    await guideMiddleware.replyToContext(ctx);
+}
 
-bot.hears('Generate!', async ctx => menuMiddleware.replyToContext(ctx));
 
-let userGuideSections = {};
-bot.hears("Guide / Гайд", (ctx) => {
-    const userId = ctx.from.id;
-
-    // Initialize user's data if it's their first time
-    if (!userData[userId]) {
-        userData[userId] = {
-            //sd_model_checkpoint: user.model,
-            width: 768,  // default width
-            height: 768,  // default height
-            cfg: '6',  // default cfg
-            sampler: 'Euler',  // default sampler
-            upscaleTo: '2',  // default upscaleTo
-            quality: '20',  // default quality
-            upscaler: 'None',  // default upscaler
-            seed: -1,  // default seed (random)
-            embedding: 'easynegative, verybadimagenegative_v1.3',
-            upscale_on: 'false'
-        };
-    }
-
-    // Initialize the user's guide section
-    userGuideSections[userId] = 0;
-
-    ctx.reply(guide_sections[0], Markup.inlineKeyboard(createMenu(0)));
+bot.hears('Generate Txt2Img', async ctx => menuMiddleware.replyToContext(ctx));
+bot.hears('Guide / Гайд', async (ctx) => {
+    await guideMiddleware.replyToContext(ctx);
 });
+
 
 // MAIN Menu
 bot.on('text', async (ctx) => {
@@ -142,18 +134,13 @@ bot.on('text', async (ctx) => {
         await startGeneration(ctx);
         await updateProgress(ctx);
     }
-    // If user has entered "Generate!"
-    else if (userText === 'Generate!') {
-        userData[userId].userPrompt = true;
-        await ctx.reply('Choose negative prompt, Then please type your prompt....', Markup.inlineKeyboard(inline_menu_embedding));
-    }
-    // If user sends any other message, start image generation
     else {
         userData[userId].prompt = userText;
         await startGeneration(ctx);
         await updateProgress(ctx);
     }
 });
+
 
 bot.on('photo', async (ctx) => {
     // Get the file_id of the highest resolution image
@@ -194,62 +181,6 @@ bot.command('generate', async (ctx) => {
     await img2img(ctx);
 });
 
-
-// Inline keyboards menus callback
-bot.on('callback_query', async (ctx) => {
-    const callbackData = ctx.update.callback_query.data;
-    const userId = ctx.from.id;
-
-    console.log('callbackData:', callbackData);
-    console.log('userId:', userId);
-    console.log('userData:', userData);
-
-    if(!userData[userId]) {
-        userData[userId] = {};
-    }
-    switch (callbackData) {
-        case NEXT:
-            if (userGuideSections[userId] < guide_sections.length - 1) {
-                userGuideSections[userId]++;
-                console.log('New section index:', userGuideSections[userId]);
-                console.log('New section text:', guide_sections[userGuideSections[userId]]);
-                console.log('New menu:', createMenu(userGuideSections[userId]));
-                ctx.editMessageText(guide_sections[userGuideSections[userId]],
-                    {reply_markup: createMenu(userGuideSections[userId])}
-                );
-            }
-            break;
-        case PREVIOUS:
-            if (userGuideSections[userId] > 0) {
-                userGuideSections[userId]--;
-                ctx.editMessageText(guide_sections[userGuideSections[userId]],
-                    {reply_markup: createMenu(userGuideSections[userId])}
-                );
-            }
-            break;
-        case END_GUIDE:
-            ctx.editMessageText("End of the guide");
-            break;
-    }
-});
-
-
-async function createMenu(index) {
-    const menu = [];
-
-    if (index > 0) {
-        menu.push(Markup.button.callback("Previous", "PREVIOUS"));
-    }
-    if (index < guide_sections.length - 1) {
-        menu.push(Markup.button.callback("Next", "NEXT"));
-    }
-    if (index === guide_sections.length - 1) {
-        menu.push(Markup.button.callback("End Guide", "END_GUIDE"));
-    }
-    return Markup.inlineKeyboard(menu);
-}
-
-
 //Main Stable-Dif functions
 async function generateImage(ctx, messageID) {
     const userId = ctx.from.id;
@@ -258,6 +189,7 @@ async function generateImage(ctx, messageID) {
         //sd_model_checkpoint: user.model,
         prompt: user.prompt,
         seed: user.seed,
+        subseed: -1,
         subseed_strength: 0.8,
         batch_count: 1,
         steps: user.quality,
@@ -272,7 +204,6 @@ async function generateImage(ctx, messageID) {
         hr_scale: user.upscaleTo,
         enable_hr: user.upscale_on,
         denoising_strength: 0.8
-
     };
 
     const headers = {'accept': 'application/json'};
@@ -290,17 +221,13 @@ async function generateImage(ctx, messageID) {
             console.log('Upscale on:', user.upscale_on);
             if (user.upscale_on === -1) { //Not relevant more need to clean up or replace to Control net function call
                 await upscaleImage(ctx, messageID);
-                console.log('Upscaling should start now...');
 
                 await cleanup(ctx, messageID);
-                console.log('Upscaling completed, starting cleanup...');
             } else {
-                console.log('Upscale off. Sending image without upscaling...');
                 await ctx.replyWithPhoto({ source: fs.createReadStream('generated_image.png') },
                     { reply_markup: { inline_keyboard: inline_menu_again } } );
                 await cleanup(ctx, messageID);
                 console.log('Sent image and cleaned up');
-
             }
         } else {
             await ctx.reply(`Generation failed with status code ${response.status}`);
@@ -309,9 +236,15 @@ async function generateImage(ctx, messageID) {
         }
     } catch (err) {
         console.error(err);
+        if (err.response && err.response.data && err.response.data.error) {
+            await ctx.reply(`Oops, something went wrong: Please try again ;P`);
+        } else {
+            await ctx.reply("Oops, something went wrong");
+        }
+        await cleanup(ctx, messageID);
+        user.image_ready = true;
     }
 }
-
 
 
 // img2img flow
@@ -426,16 +359,21 @@ async function upscaleImage(ctx) {
     }
 }
 
+
 async function getProgress() {
     try {
         const response = await axios.get(`${url}/sdapi/v1/progress?skip_current_image=false`);
         const data = response.data;
         const progress = data.progress;
         const eta_relative = data.eta_relative;
-        return { progress, eta_relative };
+        return { progress, eta_relative, error: null };
     } catch (error) {
         console.error(`Error in getProgress: ${error}`);
-        return { progress: 0, eta_relative: 0 };  // Return default values in case of error
+        let errorMessage = "Oops, something went wrong.";
+        if (error.response && error.response.data && error.response.data.error) {
+            errorMessage = `Error: ${error.response.data.error}`;
+        }
+        return { progress: 0, eta_relative: 0, error: errorMessage };
     }
 }
 
@@ -477,7 +415,7 @@ function updateProgress(ctx) {
 
         // If the image is ready, stop the update task
         if (!userData[ctx.from.id].image_ready) {
-            setTimeout(updateTask, 500);  // If the image is not ready, re-run the task after 500ms
+            setTimeout(updateTask, 800);  // If the image is not ready, re-run the task after 500ms
         }
     };
 
@@ -498,6 +436,7 @@ async function cleanup(ctx, messageID) {
         console.error(`Cleanup failed with error ${error}`);
     }
 }
+
 axios.get(url, {
     httpAgent: httpAgent,
     httpsAgent: httpsAgent,

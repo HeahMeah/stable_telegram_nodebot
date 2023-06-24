@@ -1,4 +1,3 @@
-const TelegrafInlineMenu = require('telegraf-inline-menu');
 const { MenuTemplate, createBackMainMenuButtons } = require('telegraf-inline-menu');
 const userData = require('./datastore');
 
@@ -47,13 +46,15 @@ const inline_menu_num_of_pic = {
 
 const inline_menu_upscaler = {
      'rea': 'R-ESRGAN 4x+ Anime6B',
-     're': 'ESRGAN_4x'
+     're': 'ESRGAN_4x',
+     'noups': 'Without upscale'
+
 }
 
 const inline_menu_upscale_to = {
-    1.5: '1.5',
-    1.7:'2',
-    1.9:'3'
+    1.1: '1.5',
+    1.3:'2',
+    1.5:'3'
 
 }
 
@@ -180,6 +181,10 @@ submenuUpscaler.select('upscaler', inline_menu_upscaler, {
                 userData[userId].upscale_on = true;
                 ctx.answerCbQuery("You've selected R-ESRGAN_4x+ Anime6B.");
                 break;
+            case 'noups':
+                userData[userId].upscaler = ''
+                userData[userId].upscale_on = 'false'
+                break;
         }
         return true; // refresh menu
     },
@@ -213,7 +218,7 @@ submenuCfg.select('cfg', inline_menu_cfg, {
         const userId = ctx.from.id;
         return userData[userId].cfg === parseFloat(key);
     },
-    columns: 1
+    columns: 3
 });
 
 submenuSeed.select('seed', inline_menu_seed, {
