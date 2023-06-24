@@ -4,12 +4,12 @@ const mainMenu = new MenuTemplate(ctx => guide_sections[(userData[ctx.from.id].c
 
 
 const guide_sections = [
-    'Hey, before you start creating, this bot is made possible by:\n' +
+    'Before you start creating, this bot is made possible by:\n' +
     'Automatic1111 and many model authors from Civitai.com\n' +
     '\n'+
     'On the next page you will learn all about the parameters with which you can get exactly what you want to see :)',
-    '𝗦𝗲𝗰𝘁𝗶𝗼𝗻 2\nThis is the second section of the guide.',
-    '*Section 3*\nThis is the third section of the guide.'
+    '𝗦𝗲𝗰𝘁𝗶𝗼𝗻 2\nHere soon about parameters for text2img generation.',
+    '*Section 3*\nHere soon about parameters for img2img generation.'
 ];
 
 

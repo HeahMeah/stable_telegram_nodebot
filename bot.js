@@ -1,4 +1,4 @@
-const { Telegraf } = require('telegraf');
+const { Telegraf, Markup } = require('telegraf');
 const { MenuMiddleware } = require('telegraf-inline-menu');
 const axios = require('axios');
 const fs = require('fs');
@@ -106,9 +106,10 @@ async function handleBotStart(ctx) {
             upscale_on: 'false'
         };
     }
-
-    // Call guide middleware when the bot starts up
+    ctx.reply("Hi ;)",Markup.keyboard(menu).resize());
     await guideMiddleware.replyToContext(ctx);
+    // Call guide middleware when the bot starts up
+
 }
 
 
