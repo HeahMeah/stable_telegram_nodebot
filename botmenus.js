@@ -48,8 +48,8 @@ const inline_menu_upscaler = {
      'rea': 'R-ESRGAN 4x+ Anime6B',
      're': 'ESRGAN_4x',
      'noups': 'Without upscale'
-
 }
+
 
 const inline_menu_upscale_to = {
     1.1: '1.5',
@@ -57,6 +57,7 @@ const inline_menu_upscale_to = {
     1.5:'3'
 
 }
+
 
 const inline_menu_cfg = {
     6: 'set to 6', 6.5: 'set to 6.5', 7: 'set to 7',

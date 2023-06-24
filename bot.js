@@ -177,9 +177,11 @@ bot.on('photo', async (ctx) => {
     await img2img(ctx, messageID);
 });
 
+
 bot.command('generate', async (ctx) => {
     await img2img(ctx);
 });
+
 
 //Main Stable-Dif functions
 async function generateImage(ctx, messageID) {
