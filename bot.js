@@ -15,7 +15,7 @@ const httpsAgent = new https.Agent({ keepAlive: true });
 
 // Create the bot
 const bot = new Telegraf(process.env.BOT_TOKEN);
-const queue = [];
+
 
 
 const menu = [
@@ -24,10 +24,7 @@ const menu = [
     ["Guide / Гайд"]
 ];
 
-
-const url = 'http://127.0.0.1:7860'
 const writeFile = util.promisify(fs.writeFile);
-
 
 const menuMiddleware = new MenuMiddleware('menu/', inlineMenu);
 
@@ -144,13 +141,9 @@ bot.on('text', async (ctx) => {
 
 
 bot.on('photo', async (ctx) => {
-    // Get the file_id of the highest resolution image
     const fileId = ctx.message.photo.pop().file_id;
-    // Get the file object using the file_id
     const file = await ctx.telegram.getFile(fileId);
-    // Construct the file download URL
     const fileUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
-    // Download
     await axios({
         url: fileUrl,
         responseType: 'stream',
@@ -210,7 +203,7 @@ async function generateImage(ctx, messageID) {
     };
 
     const headers = {'accept': 'application/json'};
-    const endpoint = `${url}/sdapi/v1/txt2img`;
+    const endpoint = `${instances.url}/sdapi/v1/txt2img`;
 
     try {
         const response = await axios.post(endpoint, payload, {headers: headers});
@@ -296,7 +289,7 @@ async function img2img(ctx,messageID){
         alwayson_scripts: {}
     };
     const headers = {'accept': 'application/json'};
-    const endpoint = `${url}/sdapi/v1/img2img`;
+    const endpoint = `${instances.url}/sdapi/v1/img2img`;
 
 
     try {
@@ -344,7 +337,7 @@ async function upscaleImage(ctx) {
     };
 
     const headers = {'accept': 'application/json'};
-    const endpoint = `${url}/sdapi/v1/extra-single-image`;
+    const endpoint = `${instances.url}/sdapi/v1/extra-single-image`;
 
     try {
         const response = await axios.post(endpoint, payload, {headers: headers});
@@ -365,7 +358,7 @@ async function upscaleImage(ctx) {
 
 async function getProgress() {
     try {
-        const response = await axios.get(`${url}/sdapi/v1/progress?skip_current_image=false`);
+        const response = await axios.get(`${instances.url}/sdapi/v1/progress?skip_current_image=false`);
         const data = response.data;
         const progress = data.progress;
         const eta_relative = data.eta_relative;
@@ -440,7 +433,7 @@ async function cleanup(ctx, messageID) {
     }
 }
 
-axios.get(url, {
+axios.get(instances.url, {
     httpAgent: httpAgent,
     httpsAgent: httpsAgent,
 });
