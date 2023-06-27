@@ -10,12 +10,8 @@ const guideMiddleware = require('./guidemenu'); //Import main menu
 const http = require('http');
 const https = require('https');
 
-const httpAgent = new http.Agent({ keepAlive: true });
-const httpsAgent = new https.Agent({ keepAlive: true });
-
 // Create the bot
 const bot = new Telegraf(process.env.BOT_TOKEN);
-
 
 
 const menu = [
@@ -83,6 +79,29 @@ bot.action('generate_again', async (ctx) => {
     }
 });
 
+function createPayload(user) {
+    return {
+        //sd_model_checkpoint: user.model,
+        prompt: user.prompt,
+        seed: user.seed,
+        subseed: -1,
+        subseed_strength: 0.8,
+        batch_count: 1,
+        steps: user.quality,
+        cfg_scale: user.cfg,
+        width: user.width,
+        height: user.height,
+        negative_prompt: user.embedding,
+        sampler_index: user.sampler,
+        send_images: "true",
+        save_images: "true",
+        hr_upscaler: user.upscaler,
+        hr_scale: user.upscaleTo,
+        enable_hr: user.upscale_on,
+        denoising_strength: 0.5
+    };
+}
+
 
 bot.start((ctx) => handleBotStart(ctx));
 async function handleBotStart(ctx) {
@@ -102,17 +121,43 @@ async function handleBotStart(ctx) {
             embedding: 'easynegative, verybadimagenegative_v1.3',
             upscale_on: 'false'
         };
+
+        userData[userId].payload = createPayload(userData[userId]);  // Add this line
     }
     ctx.reply("Hi ;)",Markup.keyboard(menu).resize());
     await guideMiddleware.replyToContext(ctx);
-    // Call guide middleware when the bot starts up
-
 }
 
 
-bot.hears('Generate Txt2Img', async ctx => menuMiddleware.replyToContext(ctx));
+bot.hears('Generate Txt2Img', async ctx => {
+    userData[ctx.from.id] = {
+        ctx: ctx,
+        type: 'txt2img'
+    };
+    await menuMiddleware.replyToContext(ctx)
+});
+
+
+bot.hears('Generate Img2Img', async ctx => {
+    userData[ctx.from.id] = {
+        ctx: ctx,
+        type: 'img2img'
+    };
+    await menuMiddleware.replyToContext(ctx)
+});
+
+
 bot.hears('Guide / Гайд', async (ctx) => {
     await guideMiddleware.replyToContext(ctx);
+});
+
+
+bot.hears('Generate Txt2Img', async ctx => {
+    userData[ctx.from.id] = {
+        ctx: ctx,
+        type: 'txt2img'
+    };
+    await menuMiddleware.replyToContext(ctx);
 });
 
 
@@ -178,32 +223,13 @@ bot.command('generate', async (ctx) => {
 
 
 //Main Stable-Dif functions
-async function generateImage(ctx, messageID) {
+async function generateImage(ctx, userPayload, instance) {
     const userId = ctx.from.id;
     const user = userData[userId];
-    const payload = {
-        //sd_model_checkpoint: user.model,
-        prompt: user.prompt,
-        seed: user.seed,
-        subseed: -1,
-        subseed_strength: 0.8,
-        batch_count: 1,
-        steps: user.quality,
-        cfg_scale: user.cfg,
-        width: user.width,
-        height: user.height,
-        negative_prompt: user.embedding,
-        sampler_index: user.sampler,
-        send_images: "true",
-        save_images: "true",
-        hr_upscaler: user.upscaler,
-        hr_scale: user.upscaleTo,
-        enable_hr: user.upscale_on,
-        denoising_strength: 0.8
-    };
+    const payload = userPayload.payload;
 
     const headers = {'accept': 'application/json'};
-    const endpoint = `${instances.url}/sdapi/v1/txt2img`;
+    const endpoint = `${instance.url}/sdapi/v1/txt2img`;
 
     try {
         const response = await axios.post(endpoint, payload, {headers: headers});
@@ -244,7 +270,7 @@ async function generateImage(ctx, messageID) {
 
 
 // img2img flow
-async function img2img(ctx,messageID){
+async function img2img(ctx,messageID,instance){
     const userId = ctx.from.id;
     const user = userData[userId];
 
@@ -289,7 +315,7 @@ async function img2img(ctx,messageID){
         alwayson_scripts: {}
     };
     const headers = {'accept': 'application/json'};
-    const endpoint = `${instances.url}/sdapi/v1/img2img`;
+    const endpoint = `${instance.url}/sdapi/v1/img2img`;
 
 
     try {
@@ -322,7 +348,7 @@ async function img2img(ctx,messageID){
 
 
 //Upscale
-async function upscaleImage(ctx) {
+async function upscaleImage(ctx, instance) {
     const userId = ctx.from.id;
     const user = userData[userId];
     const payload = {
@@ -337,7 +363,7 @@ async function upscaleImage(ctx) {
     };
 
     const headers = {'accept': 'application/json'};
-    const endpoint = `${instances.url}/sdapi/v1/extra-single-image`;
+    const endpoint = `${instance.url}/sdapi/v1/extra-single-image`;
 
     try {
         const response = await axios.post(endpoint, payload, {headers: headers});
@@ -356,9 +382,9 @@ async function upscaleImage(ctx) {
 }
 
 
-async function getProgress() {
+async function getProgress(instance) {
     try {
-        const response = await axios.get(`${instances.url}/sdapi/v1/progress?skip_current_image=false`);
+        const response = await axios.get(`${instance.url}/sdapi/v1/progress?skip_current_image=false`);
         const data = response.data;
         const progress = data.progress;
         const eta_relative = data.eta_relative;
@@ -373,7 +399,7 @@ async function getProgress() {
     }
 }
 
-function updateProgress(ctx) {
+function updateProgress(ctx,instance) {
     let lastProgress = 0;
     let lastMessage = '';
     let spinnerStates = ['-', '\\', '|', '/'];
@@ -381,7 +407,7 @@ function updateProgress(ctx) {
     let messageID = userData[ctx.from.id].message_id;
 
     const updateTask = async () => {
-        const { progress, eta_relative } = await getProgress();
+        const { progress, eta_relative } = await getProgress(instance);
 
         const progressPercentage = Math.floor(progress * 100);
         const etaMinutes = Math.floor(eta_relative / 60);
@@ -418,13 +444,15 @@ function updateProgress(ctx) {
     updateTask();  // Start the task
 }
 
-async function startGeneration(ctx) {
+async function startGeneration(ctx, userPayload, instance) {
+    const { message_id } = userPayload
     const message = await ctx.reply('Generating image...');
     userData[ctx.from.id].message_id = message.message_id;
     userData[ctx.from.id].image_ready = false;
-    await updateProgress(ctx);
-    await generateImage(ctx,message.message_id);
+    await updateProgress(ctx, instance);
+    await generateImage(ctx,message.message_id, instance);
 }
+
 async function cleanup(ctx, messageID) {
     try {
         await ctx.telegram.deleteMessage(ctx.chat.id, messageID);
@@ -433,9 +461,17 @@ async function cleanup(ctx, messageID) {
     }
 }
 
-axios.get(instances.url, {
-    httpAgent: httpAgent,
-    httpsAgent: httpsAgent,
-});
+
+async function makeRequest(instance) {
+    const httpAgent = new http.Agent({keepAlive: true});
+    const httpsAgent = new https.Agent({keepAlive: true});
+
+    const response = await axios.get(instance.url, {
+        httpAgent: httpAgent,
+        httpsAgent: httpsAgent,
+    });
+}
 
 bot.launch()
+
+export {startGeneration}

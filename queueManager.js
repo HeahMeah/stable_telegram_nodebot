@@ -1,6 +1,8 @@
 const instanceManager = require('./instanceManager');
 const userQueue = [];
 const userData = require('./datastore');
+import {startGeneration} from "./bot";
+
 
 function enqueueUser(userId, userPayload) {
     // Store user's data
@@ -10,9 +12,11 @@ function enqueueUser(userId, userPayload) {
     userQueue.push(userId);
 }
 
+
 function dequeueUser() {
     const userId = userQueue.shift();
     const userPayload = userData[userId];
+
 
     // Clean up the user data
     delete userData[userId];
@@ -20,14 +24,20 @@ function dequeueUser() {
     return { userId, userPayload };
 }
 
+
 async function processQueue() {
     if (userQueue.length > 0) {
         const instance = await instanceManager.getFreeInstance();
         if (instance) {
             const { userId, userPayload } = dequeueUser();
+            const ctx = userData[userId].ctx;
 
-            // Send user's payload to instance
-            await instanceManager.sendPayloadToInstance(instance, userId, userPayload);
+            //Call start generation=
+            if (userPayload.type === 'txt2img') {
+                startGeneration(ctx, userPayload.message_id, instance);
+            } else if (userPayload.type === 'img2img') {
+                startGeneration(ctx, userPayload.message_id, instance);
+            }
         }
     }
 
@@ -35,4 +45,4 @@ async function processQueue() {
     setTimeout(processQueue, 1000);
 }
 
-module.exports = { enqueueUser, processQueue };
+export {enqueueUser, processQueue}
