@@ -37,4 +37,4 @@ async function getFreeInstance() {
 }
 
 
-module.exports = { getFreeInstance };
+module.exports.getFreeInstance =  getFreeInstance;

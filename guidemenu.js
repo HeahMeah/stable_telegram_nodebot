@@ -47,4 +47,4 @@ mainMenu.interact('End Guide', 'guide:end_guide', {
 
 
 const guideMiddleware = new MenuMiddleware('guide/', mainMenu);
-module.exports = guideMiddleware;
+module.exports.guideMiddleware = guideMiddleware;

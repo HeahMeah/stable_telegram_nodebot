@@ -9,6 +9,7 @@ const inlineMenu = require('./botmenus'); // Import inline menus
 const guideMiddleware = require('./guidemenu'); //Import main menu
 const http = require('http');
 const https = require('https');
+const {enqueueUser, processQueue} = require ('./queueManager');
 
 // Create the bot
 const bot = new Telegraf(process.env.BOT_TOKEN);
@@ -51,7 +52,7 @@ bot.use((ctx, next) => {  // Use user data initialization middleware
     }
     return next();
 });
-
+processQueue();
 
 bot.use((ctx, next) => { // Middleware management
     if (!ctx.callbackQuery || !ctx.callbackQuery.data) {
@@ -65,42 +66,6 @@ bot.use((ctx, next) => { // Middleware management
     }
     return next();
 });
-
-
-bot.action('generate_again', async (ctx) => {
-    try {
-        console.log('Before startGeneration');
-        await startGeneration(ctx);
-        await updateProgress(ctx);
-        await ctx.answerCbQuery('Generating the image again...');
-
-    } catch (error) {
-        console.error(`Error in generating image again:`, error);
-    }
-});
-
-function createPayload(user) {
-    return {
-        //sd_model_checkpoint: user.model,
-        prompt: user.prompt,
-        seed: user.seed,
-        subseed: -1,
-        subseed_strength: 0.8,
-        batch_count: 1,
-        steps: user.quality,
-        cfg_scale: user.cfg,
-        width: user.width,
-        height: user.height,
-        negative_prompt: user.embedding,
-        sampler_index: user.sampler,
-        send_images: "true",
-        save_images: "true",
-        hr_upscaler: user.upscaler,
-        hr_scale: user.upscaleTo,
-        enable_hr: user.upscale_on,
-        denoising_strength: 0.5
-    };
-}
 
 
 bot.start((ctx) => handleBotStart(ctx));
@@ -122,7 +87,9 @@ async function handleBotStart(ctx) {
             upscale_on: 'false'
         };
 
-        userData[userId].payload = createPayload(userData[userId]);  // Add this line
+        userData[userId].payload = createPayload(userData[userId]);
+        userData[userId].ctx = ctx;
+        console.log(userData);
     }
     ctx.reply("Hi ;)",Markup.keyboard(menu).resize());
     await guideMiddleware.replyToContext(ctx);
@@ -134,6 +101,7 @@ bot.hears('Generate Txt2Img', async ctx => {
         ctx: ctx,
         type: 'txt2img'
     };
+    console.log(userData);
     await menuMiddleware.replyToContext(ctx)
 });
 
@@ -143,6 +111,7 @@ bot.hears('Generate Img2Img', async ctx => {
         ctx: ctx,
         type: 'img2img'
     };
+
     await menuMiddleware.replyToContext(ctx)
 });
 
@@ -167,20 +136,30 @@ bot.on('text', async (ctx) => {
     const userId = ctx.from.id;
 
     if (!userData[userId]) {
-        userData[userId] = {};
+        userData[userId] = {
+            // Default values here
+        };
     }
 
     // If user is expected to provide a prompt
     if (userData[userId].userPrompt) {
         userData[userId].prompt = userText;
         userData[userId].userPrompt = false;
-        await startGeneration(ctx);
-        await updateProgress(ctx);
-    }
-    else {
+    } else {
         userData[userId].prompt = userText;
-        await startGeneration(ctx);
-        await updateProgress(ctx);
+    }
+
+    // Update the payload every time user's data is updated
+    userData[userId].payload = createPayload(userData[userId]);
+    userData[userId].type = 'txt2img';
+    userData[userId].ctx = ctx;
+
+    try {
+        // Enqueue the user with updated payload
+        enqueueUser(userId, userData[userId].payload);
+        ctx.reply('Added your request to the queue. Please wait.');
+    } catch (error) {
+        console.error(`Error in adding to queue:`, error);
     }
 });
 
@@ -216,11 +195,47 @@ bot.on('photo', async (ctx) => {
     await img2img(ctx, messageID);
 });
 
+bot.action('generate_again', async (ctx) => {
+    try {
+        const userId = ctx.from.id;
+        // Ensure that user data and payload exist
+        if (!userData[userId] || !userData[userId].payload) {
+            console.error(`User data or payload not found for ID: ${userId}`);
+            return;
+        }
+        // Enqueue the user with stored payload
+        enqueueUser(userId, userData[userId].payload);
+        await ctx.answerCbQuery('Generating the image again...');
+    } catch (error) {
+        console.error(`Error in generating image again:`, error);
+    }
+});
 
-bot.command('generate', async (ctx) => {
+bot.command('generate1', async (ctx) => {
     await img2img(ctx);
 });
 
+function createPayload(user) {
+    return {
+        prompt: user.prompt || 'Duck',
+        seed: user.seed || -1,
+        subseed: user.subseed || -1,
+        subseed_strength: user.subseed_strength || 0.8,
+        batch_count: user.batch_count || 1,
+        steps: user.steps || '20',
+        cfg_scale: user.cfg_scale || '6',
+        width: user.width || 768,
+        height: user.height || 768,
+        negative_prompt: user.negative_prompt || 'easynegative, verybadimagenegative_v1.3',
+        sampler_index: user.sampler_index || 'Euler',
+        send_images: user.send_images || 'true',
+        save_images: user.save_images || 'true',
+        hr_upscaler: user.hr_upscaler || 'None',
+        hr_scale: user.hr_scale || '2',
+        enable_hr: user.enable_hr || 'false',
+        denoising_strength: user.denoising_strength || 0.5
+    };
+}
 
 //Main Stable-Dif functions
 async function generateImage(ctx, userPayload, instance) {
@@ -445,10 +460,9 @@ function updateProgress(ctx,instance) {
 }
 
 async function startGeneration(ctx, userPayload, instance) {
-    const { message_id } = userPayload
     const message = await ctx.reply('Generating image...');
-    userData[ctx.from.id].message_id = message.message_id;
-    userData[ctx.from.id].image_ready = false;
+    userPayload.message_id = message.message_id;
+    userPayload.image_ready = false;
     await updateProgress(ctx, instance);
     await generateImage(ctx,message.message_id, instance);
 }
@@ -472,6 +486,7 @@ async function makeRequest(instance) {
     });
 }
 
+module.exports.startGeneration = startGeneration;
+
 bot.launch()
 
-export {startGeneration}
