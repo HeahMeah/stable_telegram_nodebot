@@ -15,7 +15,7 @@ async function isInstanceBusy(instance) {
     try {
         const response = await axios.get(`${instance.url}/sdapi/v1/progress?skip_current_image=false`);
         // If the progress is greater than 0 = true
-        // TODO: Check another method in API - temporary checking by progress = meah
+        // TODO: Check another method in API - temporary checking by progress
         return response.data.progress > 0;
     } catch (error) {
         console.log(`Error checking instance status: ${error}`);

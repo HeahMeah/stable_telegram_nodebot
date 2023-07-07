@@ -1,6 +1,8 @@
 const { MenuTemplate, MenuMiddleware } = require('telegraf-inline-menu');
 const userData = require('./datastore');
 const mainMenu = new MenuTemplate(ctx => guide_sections[(userData[ctx.from.id].currentSectionIndex || 0)]);
+const inlineMenu = require('./botmenus'); // Import inline menus
+const menuMiddleware = new MenuMiddleware('menu/', inlineMenu);
 
 
 const guide_sections = [
@@ -9,7 +11,7 @@ const guide_sections = [
     '\n'+
     'On the next page you will learn all about the parameters with which you can get exactly what you want to see :)',
     '𝗦𝗲𝗰𝘁𝗶𝗼𝗻 2\nHere soon about parameters for text2img generation.',
-    '*Section 3*\nHere soon about parameters for img2img generation.'
+    '𝗦𝗲𝗰𝘁𝗶𝗼𝗻 3\nHere soon about parameters for img2img generation.'
 ];
 
 
@@ -39,7 +41,8 @@ mainMenu.interact('Back', 'guide:previous_section', {
 mainMenu.interact('End Guide', 'guide:end_guide', {
     do: async (ctx) => {
         // TODO: replace the following with a call to the function that opens the 'Generate Txt2Img' menu.
-        await ctx.reply('Guide ended. You can now start the Generate Txt2Img process.');
+        await ctx.reply('Guide ended. You can now start - enjoy!');
+        await menuMiddleware.replyToContext(ctx)
         return false;
     },
     joinLastRow: true

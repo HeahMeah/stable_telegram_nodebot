@@ -6,10 +6,10 @@ const util = require('util');
 const userData = require('./datastore');
 require('dotenv').config();
 const inlineMenu = require('./botmenus'); // Import inline menus
-const guideMiddleware = require('./guidemenu'); //Import main menu
+const { guideMiddleware } = require('./guidemenu'); //Import main menu
 const http = require('http');
 const https = require('https');
-const {enqueueUser, processQueue} = require ('./queueManager');
+const { processQueue, enqueueUser } = require ('./queueManager');
 
 // Create the bot
 const bot = new Telegraf(process.env.BOT_TOKEN);
@@ -52,7 +52,8 @@ bot.use((ctx, next) => {  // Use user data initialization middleware
     }
     return next();
 });
-processQueue();
+
+
 
 bot.use((ctx, next) => { // Middleware management
     if (!ctx.callbackQuery || !ctx.callbackQuery.data) {
@@ -75,8 +76,8 @@ async function handleBotStart(ctx) {
     if (!userData[userId]) {
         userData[userId] = {
             //sd_model_checkpoint: user.model,
-            width: 768,  // default width
-            height: 768,  // default height
+            width: 512,  // default width
+            height: 512,  // default height
             cfg: '6',  // default cfg
             sampler: 'Euler',  // default sampler
             upscaleTo: '1.2',  // default upscaleTo
@@ -95,23 +96,20 @@ async function handleBotStart(ctx) {
     await guideMiddleware.replyToContext(ctx);
 }
 
+processQueue ();
+
 
 bot.hears('Generate Txt2Img', async ctx => {
-    userData[ctx.from.id] = {
-        ctx: ctx,
-        type: 'txt2img'
-    };
-    console.log(userData);
+    userData[ctx.from.id].ctx = ctx;
+    userData[ctx.from.id].type = 'txt2img';
+    console.log('Generate Txt2Img handler: ', userData[ctx.from.id]);
     await menuMiddleware.replyToContext(ctx)
 });
 
 
 bot.hears('Generate Img2Img', async ctx => {
-    userData[ctx.from.id] = {
-        ctx: ctx,
-        type: 'img2img'
-    };
-
+    userData[ctx.from.id].ctx = ctx;
+    userData[ctx.from.id].type = 'img2img';
     await menuMiddleware.replyToContext(ctx)
 });
 
@@ -137,7 +135,25 @@ bot.on('text', async (ctx) => {
 
     if (!userData[userId]) {
         userData[userId] = {
-            // Default values here
+            type: 'txt2img',
+            prompt: userText || 'Banana Duck',
+            seed: -1,
+            subseed: -1,
+            subseed_strength: 0.8,
+            batch_count: 1,
+            steps: '25',
+            cfg_scale: '6',
+            width: 512,
+            height: 512,
+            negative_prompt: 'easynegative, verybadimagenegative_v1.3',
+            sampler_index: 'Euler',
+            send_images: 'true',
+            save_images: 'true',
+            hr_upscaler: 'None',
+            hr_scale: '1.2',
+            enable_hr: 'false',
+            denoising_strength: 0.5,
+            ctx: ctx,
         };
     }
 
@@ -149,51 +165,54 @@ bot.on('text', async (ctx) => {
         userData[userId].prompt = userText;
     }
 
+    // Update type and ctx before creating the payload
+    userData[ctx.from.id].type = 'txt2img';
+    userData[ctx.from.id].ctx = ctx;
+
     // Update the payload every time user's data is updated
     userData[userId].payload = createPayload(userData[userId]);
-    userData[userId].type = 'txt2img';
-    userData[userId].ctx = ctx;
 
     try {
         // Enqueue the user with updated payload
         enqueueUser(userId, userData[userId].payload);
         ctx.reply('Added your request to the queue. Please wait.');
+        console.log(userId);
     } catch (error) {
         console.error(`Error in adding to queue:`, error);
     }
 });
 
 
-bot.on('photo', async (ctx) => {
-    const fileId = ctx.message.photo.pop().file_id;
-    const file = await ctx.telegram.getFile(fileId);
-    const fileUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
-    await axios({
-        url: fileUrl,
-        responseType: 'stream',
-    }).then(
-        response =>
-            new Promise((resolve, reject) => {
-                response.data
-                    .pipe(fs.createWriteStream('user.png'))
-                    .on('finish', () => resolve())
-                    .on('error', e => reject(e));
-            }),
-    );
+//bot.on('photo', async (ctx) => {
+//    const fileId = ctx.message.photo.pop().file_id;
+//     const file = await ctx.telegram.getFile(fileId);
+//     const fileUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
+//     await axios({
+//         url: fileUrl,
+//         responseType: 'stream',
+//     }).then(
+//         response =>
+//             new Promise((resolve, reject) => {
+//                 response.data
+//                     .pipe(fs.createWriteStream('user.png'))
+//                     .on('finish', () => resolve())
+//                     .on('error', e => reject(e));
+//             }),
+//     );
 
     // Convert the downloaded image to base64
-    let base64str = fs.readFileSync('user.png', { encoding: 'base64' });
-    const userId = ctx.from.id;
-    if (!userData[userId]) {
-        userData[userId] = {};
-    }
-    userData[userId].init_image = base64str;
-
-    await ctx.reply('Image received and saved.');
-
-    const messageID = await startGeneration(ctx);
-    await img2img(ctx, messageID);
-});
+//     let base64str = fs.readFileSync('user.png', { encoding: 'base64' });
+//     const userId = ctx.from.id;
+//     if (!userData[userId]) {
+//         userData[userId] = {};
+//     }
+//     userData[userId].init_image = base64str;
+//
+//     await ctx.reply('Image received and saved.');
+//
+//     const messageID = await startGeneration(ctx);
+//     await img2img(ctx, messageID);
+// });
 
 bot.action('generate_again', async (ctx) => {
     try {
@@ -211,269 +230,10 @@ bot.action('generate_again', async (ctx) => {
     }
 });
 
+
 bot.command('generate1', async (ctx) => {
     await img2img(ctx);
 });
-
-function createPayload(user) {
-    return {
-        prompt: user.prompt || 'Duck',
-        seed: user.seed || -1,
-        subseed: user.subseed || -1,
-        subseed_strength: user.subseed_strength || 0.8,
-        batch_count: user.batch_count || 1,
-        steps: user.steps || '20',
-        cfg_scale: user.cfg_scale || '6',
-        width: user.width || 768,
-        height: user.height || 768,
-        negative_prompt: user.negative_prompt || 'easynegative, verybadimagenegative_v1.3',
-        sampler_index: user.sampler_index || 'Euler',
-        send_images: user.send_images || 'true',
-        save_images: user.save_images || 'true',
-        hr_upscaler: user.hr_upscaler || 'None',
-        hr_scale: user.hr_scale || '2',
-        enable_hr: user.enable_hr || 'false',
-        denoising_strength: user.denoising_strength || 0.5
-    };
-}
-
-//Main Stable-Dif functions
-async function generateImage(ctx, userPayload, instance) {
-    const userId = ctx.from.id;
-    const user = userData[userId];
-    const payload = userPayload.payload;
-
-    const headers = {'accept': 'application/json'};
-    const endpoint = `${instance.url}/sdapi/v1/txt2img`;
-
-    try {
-        const response = await axios.post(endpoint, payload, {headers: headers});
-        if (response.status === 200) {
-            const image_data_base64 = response.data.images[0];
-            user.image_data_base64 = image_data_base64;
-            const image_data = Buffer.from(image_data_base64, 'base64');
-            await writeFile("generated_image.png", image_data);
-            user.image_ready = true;
-
-            console.log('Upscale on:', user.upscale_on);
-            if (user.upscale_on === -1) { //Not relevant more need to clean up or replace to Control net function call
-                await upscaleImage(ctx, messageID);
-
-                await cleanup(ctx, messageID);
-            } else {
-                await ctx.replyWithPhoto({ source: fs.createReadStream('generated_image.png') },
-                    { reply_markup: { inline_keyboard: inline_menu_again } } );
-                await cleanup(ctx, messageID);
-                console.log('Sent image and cleaned up');
-            }
-        } else {
-            await ctx.reply(`Generation failed with status code ${response.status}`);
-            await cleanup(ctx, messageID);
-            user.image_ready = true;
-        }
-    } catch (err) {
-        console.error(err);
-        if (err.response && err.response.data && err.response.data.error) {
-            await ctx.reply(`Oops, something went wrong: Please try again ;P`);
-        } else {
-            await ctx.reply("Oops, something went wrong");
-        }
-        await cleanup(ctx, messageID);
-        user.image_ready = true;
-    }
-}
-
-
-// img2img flow
-async function img2img(ctx,messageID,instance){
-    const userId = ctx.from.id;
-    const user = userData[userId];
-
-    const payload = {
-        init_images: user.init_image, //here i should put base64code
-        resize_mode: 0,
-        denoising_strength: 0.75,
-        image_cfg_scale: 0,
-        mask: user.mask,
-        mask_blur: 4,
-        inpainting_fill: 0,
-        inpaint_full_res: true,
-        inpaint_full_res_padding: 0,
-        inpainting_mask_invert: 0,
-        initial_noise_multiplier: 0,
-        prompt: user.prompt,
-        seed: user.seed,
-        subseed: -1,
-        subseed_strength: 0.5,
-        sampler_name: user.sampler_name,
-        batch_size: 1,
-        n_iter: 1,
-        steps: user.steps,
-        cfg_scale: user.cfg,
-        width: user.width,
-        height: user.height,
-        restore_faces: false,
-        tiling: false,
-        do_not_save_samples: true,
-        do_not_save_grid: true,
-        negative_prompt: user.embedding,
-        eta: 0,
-        s_churn: 0,
-        s_tmax: 0,
-        s_tmin: 0,
-        s_noise: 1,
-        script_args: [],
-        sampler_index: "Euler",
-        include_init_images: false,
-        send_images: true,
-        save_images: false,
-        alwayson_scripts: {}
-    };
-    const headers = {'accept': 'application/json'};
-    const endpoint = `${instance.url}/sdapi/v1/img2img`;
-
-
-    try {
-        const response = await axios.post(endpoint, payload, {headers: headers});
-        if (response.status === 200) {
-            const image_data_base64 = response.data.images[0];
-            user.image_data_base64 = image_data_base64;
-            const image_data = Buffer.from(image_data_base64, 'base64');
-            await writeFile("generated_imh2img.png", image_data);
-
-            if (user.upscale_on === "true") {
-                await upscaleImage(ctx, messageID);
-                await cleanup(ctx, messageID);
-            } else {
-                await ctx.replyWithPhoto({ source: fs.createReadStream('generated_img2img.png') },
-                    { reply_markup: { inline_keyboard: inline_menu_again } } );
-                await cleanup(ctx, messageID);
-
-            }
-            user.image_ready = true;
-        } else {
-            await ctx.reply(`Generation failed with status code ${response.status}`);
-            await cleanup(ctx, messageID);
-            user.image_ready = true;
-        }
-    } catch (err) {
-        console.error(err);
-    }
-}
-
-
-//Upscale
-async function upscaleImage(ctx, instance) {
-    const userId = ctx.from.id;
-    const user = userData[userId];
-    const payload = {
-        resize_mode: 0,
-        upscaling_resize: user.upscaleTo,
-        upscaler_1: user.upscaler,
-        upscaler_2: "None",
-        extras_upscaler_2_visibility: 0,
-        upscale_first: false,
-        image: user.image_data_base64,
-        denoising_strength: 0.5
-    };
-
-    const headers = {'accept': 'application/json'};
-    const endpoint = `${instance.url}/sdapi/v1/extra-single-image`;
-
-    try {
-        const response = await axios.post(endpoint, payload, {headers: headers});
-        if (response.status === 200) {
-            const upscaled_image_data_base64 = response.data.image;
-            const upscaled_image_data = Buffer.from(upscaled_image_data_base64, 'base64');
-            await writeFile("upscaled_image.png", upscaled_image_data);
-            await ctx.replyWithPhoto({ source: fs.createReadStream('upscaled_image.png') });
-        } else {
-            await ctx.reply(`Upscaling failed with status code ${response.status}`);
-
-        }
-    } catch (err) {
-        console.error(err);
-    }
-}
-
-
-async function getProgress(instance) {
-    try {
-        const response = await axios.get(`${instance.url}/sdapi/v1/progress?skip_current_image=false`);
-        const data = response.data;
-        const progress = data.progress;
-        const eta_relative = data.eta_relative;
-        return { progress, eta_relative, error: null };
-    } catch (error) {
-        console.error(`Error in getProgress: ${error}`);
-        let errorMessage = "Oops, something went wrong.";
-        if (error.response && error.response.data && error.response.data.error) {
-            errorMessage = `Error: ${error.response.data.error}`;
-        }
-        return { progress: 0, eta_relative: 0, error: errorMessage };
-    }
-}
-
-function updateProgress(ctx,instance) {
-    let lastProgress = 0;
-    let lastMessage = '';
-    let spinnerStates = ['-', '\\', '|', '/'];
-    let spinnerIndex = 0;
-    let messageID = userData[ctx.from.id].message_id;
-
-    const updateTask = async () => {
-        const { progress, eta_relative } = await getProgress(instance);
-
-        const progressPercentage = Math.floor(progress * 100);
-        const etaMinutes = Math.floor(eta_relative / 60);
-        const etaSeconds = Math.floor(eta_relative % 60);
-        const spinnerState = spinnerStates[spinnerIndex % 4];
-        console.log("Progress!!", progress);
-
-        const newMessage = `Generating image...${spinnerState} (${progressPercentage}% complete, ETA: ${etaMinutes}m ${etaSeconds}s)`;
-
-        // If the new message is different from the last message, update the message
-        if (newMessage !== lastMessage) {
-            try {
-                await ctx.telegram.editMessageText(
-                    ctx.chat.id,
-                    messageID,
-                    undefined,
-                    newMessage
-                );
-                lastMessage = newMessage;  // Store the new message as the last message
-            } catch (error) {
-                console.error(`Failed to update progress: ${error}`);
-            }
-        }
-
-        lastProgress = progress;
-        spinnerIndex = (spinnerIndex + 1) % 4; // Ensure spinnerIndex stays within the range of spinnerStates
-
-        // If the image is ready, stop the update task
-        if (!userData[ctx.from.id].image_ready) {
-            setTimeout(updateTask, 800);  // If the image is not ready, re-run the task after 500ms
-        }
-    };
-
-    updateTask();  // Start the task
-}
-
-async function startGeneration(ctx, userPayload, instance) {
-    const message = await ctx.reply('Generating image...');
-    userPayload.message_id = message.message_id;
-    userPayload.image_ready = false;
-    await updateProgress(ctx, instance);
-    await generateImage(ctx,message.message_id, instance);
-}
-
-async function cleanup(ctx, messageID) {
-    try {
-        await ctx.telegram.deleteMessage(ctx.chat.id, messageID);
-    } catch (error) {
-        console.error(`Cleanup failed with error ${error}`);
-    }
-}
 
 
 async function makeRequest(instance) {
@@ -486,7 +246,28 @@ async function makeRequest(instance) {
     });
 }
 
-module.exports.startGeneration = startGeneration;
+function createPayload(user) {
+    return {
+        type: user.type,
+        prompt: user.prompt || 'Banana Duck',
+        seed: user.seed || -1,
+        subseed: user.subseed || -1,
+        subseed_strength: user.subseed_strength || 0.8,
+        batch_count: user.batch_count || 1,
+        steps: user.steps || '25',
+        cfg_scale: user.cfg_scale || '6',
+        width: user.width || 512,
+        height: user.height || 512,
+        negative_prompt: user.negative_prompt || 'easynegative, verybadimagenegative_v1.3',
+        sampler_index: user.sampler_index || 'Euler',
+        send_images: user.send_images || 'true',
+        save_images: user.save_images || 'true',
+        hr_upscaler: user.hr_upscaler || 'None',
+        hr_scale: user.hr_scale || '1.2',
+        enable_hr: user.enable_hr || 'false',
+        denoising_strength: user.denoising_strength || 0.5
+    };
+}
 
 bot.launch()
 

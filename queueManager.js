@@ -1,18 +1,19 @@
 const instanceManager = require ('./instanceManager');
 const userQueue = [];
 const userData = require('./datastore');
-const startGeneration = require('./bot').startGeneration;
+const { startGeneration } = require('./imageGeneration');
 
 
 function enqueueUser(userId, userPayload) {
     // Store user's data
-    userData[userId] = userPayload;
-    console.log(userPayload);
+    userData[userId] = {
+        userPayload,
+        chatId: chatId, };
 
     // Enqueue user's id
     userQueue.push(userId);
+    console.log("User with ID - ", userId, "in queue");
 }
-
 
 function dequeueUser() {
     const userId = userQueue.shift();
@@ -22,27 +23,29 @@ function dequeueUser() {
 }
 
 
-function cleanUpUser(userId) {
-    delete userData[userId];
-}
-
 
 async function processQueue() {
+    console.log("Running processQueue");
     try {
         if (userQueue.length > 0) {
+            console.log("There are users in the queue");
             const instance = await instanceManager.getFreeInstance();
             if (instance) {
+                console.log("Found a free instance: ", instance);
                 const { userId, userPayload } = dequeueUser();
-                const ctx = userData[userId].ctx;
+                const ctx = userData[userId].chatId;
 
+                console.log("User payload: ", userPayload);
+                console.log("Payload type: ", userPayload.type);
 
                 //Call start generation
                 if (userPayload.type === 'txt2img') {
-                    await startGeneration(ctx, userPayload.message_id, instance);
+                    console.log("Starting generation with payload: ", userPayload);
+                    await startGeneration(chatId, userPayload, instance);
+
                 } else if (userPayload.type === 'img2img') {
-                    await startGeneration(ctx, userPayload.message_id, instance);
+                    await startGeneration(chatId, userPayload, instance);
                 }
-                cleanUpUser(userId);
             }
         }
     } catch (error) {
